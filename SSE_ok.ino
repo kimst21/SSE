@@ -1,80 +1,82 @@
-#include <WiFi.h>
-#include <AsyncTCP.h>
-#include <ESPAsyncWebServer.h>
-#include <Adafruit_BME280.h>
-#include <Adafruit_Sensor.h>
+// 필요한 라이브러리 포함
+#include <WiFi.h>                // ESP32 Wi-Fi 기능을 위한 라이브러리
+#include <AsyncTCP.h>            // 비동기 TCP 통신을 위한 라이브러리 (AsyncWebServer 사용 필수)
+#include <ESPAsyncWebServer.h>   // 비동기 웹 서버 라이브러리
+#include <Adafruit_BME280.h>     // BME280 센서를 위한 라이브러리
+#include <Adafruit_Sensor.h>     // Adafruit 센서 라이브러리 (BME280 사용)
 
-// 네트워크 자격 증명으로 대체
-const char* ssid = "";
-const char* password = "";
+// 네트워크 자격 증명 설정
+const char* ssid = "";           // Wi-Fi SSID (사용자가 입력해야 함)
+const char* password = "";       // Wi-Fi 비밀번호 (사용자가 입력해야 함)
 
-// 포트 80에서 Async WebServer 개체 생성
+// 웹 서버 객체 생성 (포트 80 사용)
 AsyncWebServer server(80);
 
-// 이벤트에 이벤트 소스 생성
+// 클라이언트로 데이터를 지속적으로 전송할 이벤트 소스 생성
 AsyncEventSource events("/events");
 
-// Timer variables
+// 타이머 변수 (데이터 전송 간격 설정)
 unsigned long lastTime = 0;  
-unsigned long timerDelay = 30000;
+unsigned long timerDelay = 30000; // 30초마다 센서 데이터 업데이트
 
-// 센서 개체 만들기
-Adafruit_BME280 bme;         // BME280 connect to ESP32 I2C 
+// BME280 센서 객체 생성
+Adafruit_BME280 bme;  // BME280 센서를 I2C로 연결
 
+// 센서 데이터 저장 변수
 float temperature;
 float humidity;
 float pressure;
 
-// Init BME280
+// BME280 센서 초기화
 void initBME(){
-    if (!bme.begin(0x76)) {
-    Serial.println("Could not find a valid BME280 sensor, check wiring!");
-    while (1);
-  }
+    if (!bme.begin(0x76)) {  // BME280 센서 I2C 주소 0x76에서 찾기
+        Serial.println("Could not find a valid BME280 sensor, check wiring!");
+        while (1);  // 센서를 찾을 수 없으면 무한 루프
+    }
 }
 
+// 센서 값 읽기
 void getSensorReadings(){
-  temperature = bme.readTemperature();
-  // 온도를 화씨로 변환
-  //temperature = 1.8 * bme.readTemperature() + 32;
-  humidity = bme.readHumidity();
-  pressure = bme.readPressure()/ 100.0F;
+    temperature = bme.readTemperature();  // 온도 측정 (섭씨)
+    //temperature = 1.8 * bme.readTemperature() + 32;  // 화씨 변환 (필요 시 주석 해제)
+    humidity = bme.readHumidity();        // 습도 측정
+    pressure = bme.readPressure() / 100.0F; // 기압 측정 (hPa 단위 변환)
 }
 
-//  WiFi 초기화
+// Wi-Fi 연결 초기화
 void initWiFi() {
-    WiFi.mode(WIFI_STA);
+    WiFi.mode(WIFI_STA);  // Wi-Fi를 스테이션(STA) 모드로 설정
     WiFi.begin(ssid, password);
     Serial.print("Connecting to WiFi ..");
-    while (WiFi.status() != WL_CONNECTED) {
+    while (WiFi.status() != WL_CONNECTED) {  // Wi-Fi 연결될 때까지 대기
         Serial.print('.');
         delay(1000);
     }
-    Serial.println(WiFi.localIP());
+    Serial.println(WiFi.localIP());  // 연결된 IP 주소 출력
 }
 
+// 웹 페이지의 자리 표시자(TEMPERATURE, HUMIDITY, PRESSURE) 값 변경
 String processor(const String& var){
-  getSensorReadings();
-  //Serial.println(var);
-  if(var == "TEMPERATURE"){
-    return String(temperature);
-  }
-  else if(var == "HUMIDITY"){
-    return String(humidity);
-  }
-  else if(var == "PRESSURE"){
-    return String(pressure);
-  }
-  return String();
+    getSensorReadings();
+    if(var == "TEMPERATURE"){
+        return String(temperature);
+    }
+    else if(var == "HUMIDITY"){
+        return String(humidity);
+    }
+    else if(var == "PRESSURE"){
+        return String(pressure);
+    }
+    return String();
 }
 
+// 웹 페이지 HTML 코드 (ESP32의 플래시 메모리에 저장)
 const char index_html[] PROGMEM = R"rawliteral(
 <!DOCTYPE HTML><html>
 <head>
   <title>ESP Web Server</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <link rel="stylesheet" href="https://use.fontawesome.com/releases/v5.7.2/css/all.css" integrity="sha384-fnmOCqbTlWIlj8LyTjo7mOUStjsKC4pOpQbqyi7RrhN7udi9RwhKkMHpvLbHG9Sr" crossorigin="anonymous">
-  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="https://use.fontawesome.com/releases/v5.7.2/css/all.css">
   <style>
     html {font-family: Arial; display: inline-block; text-align: center;}
     p { font-size: 1.2rem;}
@@ -106,32 +108,16 @@ const char index_html[] PROGMEM = R"rawliteral(
 <script>
 if (!!window.EventSource) {
  var source = new EventSource('/events');
- 
- source.addEventListener('open', function(e) {
-  console.log("Events Connected");
- }, false);
- source.addEventListener('error', function(e) {
-  if (e.target.readyState != EventSource.OPEN) {
-    console.log("Events Disconnected");
-  }
- }, false);
- 
- source.addEventListener('message', function(e) {
-  console.log("message", e.data);
- }, false);
- 
+
  source.addEventListener('temperature', function(e) {
-  console.log("temperature", e.data);
   document.getElementById("temp").innerHTML = e.data;
  }, false);
  
  source.addEventListener('humidity', function(e) {
-  console.log("humidity", e.data);
   document.getElementById("hum").innerHTML = e.data;
  }, false);
  
  source.addEventListener('pressure', function(e) {
-  console.log("pressure", e.data);
   document.getElementById("pres").innerHTML = e.data;
  }, false);
 }
@@ -140,43 +126,41 @@ if (!!window.EventSource) {
 </html>)rawliteral";
 
 void setup() {
-  Serial.begin(115200);
-  initWiFi();
-  initBME();
+    Serial.begin(115200);
+    initWiFi();  // Wi-Fi 초기화
+    initBME();   // BME280 센서 초기화
 
+    // 웹 서버 처리
+    server.on("/", HTTP_GET, [](AsyncWebServerRequest *request){
+        request->send_P(200, "text/html", index_html, processor);
+    });
 
-  // 웹 서버 처리
-  server.on("/", HTTP_GET, [](AsyncWebServerRequest *request){
-    request->send_P(200, "text/html", index_html, processor);
-  });
+    // 클라이언트가 이벤트 스트림에 연결될 때 실행
+    events.onConnect([](AsyncEventSourceClient *client){
+        if(client->lastId()){
+            Serial.printf("Client reconnected! Last message ID that it got is: %u\n", client->lastId());
+        }
+        // 클라이언트가 연결되면 "hello!" 메시지를 전송하고, 재접속 간격을 10초로 설정
+        client->send("hello!", NULL, millis(), 10000);
+    });
 
-  // 웹 서버 이벤트 처리
-  events.onConnect([](AsyncEventSourceClient *client){
-    if(client->lastId()){
-      Serial.printf("Client reconnected! Last message ID that it got is: %u\n", client->lastId());
-    }
-    // hello!"라는 메시지와 함께 이벤트를 보냅니다
-    // 그리고 재접속 지연을 1초로 설정합니다
-    client->send("hello!", NULL, millis(), 10000);
-  });
-  server.addHandler(&events);
-  server.begin();
+    server.addHandler(&events);  // 이벤트 소스를 웹 서버에 추가
+    server.begin();  // 웹 서버 시작
 }
 
 void loop() {
-  if ((millis() - lastTime) > timerDelay) {
-    getSensorReadings();
-    Serial.printf("Temperature = %.2f ºC \n", temperature);
-    Serial.printf("Humidity = %.2f \n", humidity);
-    Serial.printf("Pressure = %.2f hPa \n", pressure);
-    Serial.println();
+    if ((millis() - lastTime) > timerDelay) {  // 30초마다 센서 데이터 전송
+        getSensorReadings();
+        Serial.printf("Temperature = %.2f ºC \n", temperature);
+        Serial.printf("Humidity = %.2f \n", humidity);
+        Serial.printf("Pressure = %.2f hPa \n", pressure);
+        Serial.println();
 
-    // 센서 판독값을 사용하여 웹 클라이언트로 이벤트 전송
-    events.send("ping",NULL,millis());
-    events.send(String(temperature).c_str(),"temperature",millis());
-    events.send(String(humidity).c_str(),"humidity",millis());
-    events.send(String(pressure).c_str(),"pressure",millis());
-    
-    lastTime = millis();
-  }
+        // 클라이언트에 센서 데이터 전송 (SSE 방식)
+        events.send(String(temperature).c_str(),"temperature",millis());
+        events.send(String(humidity).c_str(),"humidity",millis());
+        events.send(String(pressure).c_str(),"pressure",millis());
+
+        lastTime = millis();  // 마지막 업데이트 시간 갱신
+    }
 }
